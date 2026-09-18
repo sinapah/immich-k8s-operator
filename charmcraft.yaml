@@ -1,0 +1,100 @@
+type: charm
+name: immich-k8s
+title: Immich K8s
+summary: Operate Immich on Juju Kubernetes.
+description: |
+  Immich K8s operates the Immich photo and video management application on
+  Juju Kubernetes using the Ops framework and sidecar pattern.
+
+  The charm runs the Immich server workload with an optional machine-learning
+  sidecar, integrates with external PostgreSQL and Redis-compatible backends,
+  supports filesystem or S3-compatible media storage, and exposes integration
+  points for ingress, logging, and metrics.
+
+  PostgreSQL and Redis or Valkey are intentionally not embedded in the Immich
+  workload pod and must be supplied through Juju relations.
+
+base: ubuntu@24.04
+platforms:
+  amd64:
+  arm64:
+
+assumes:
+  - juju >= 3.6
+  - k8s-api
+
+parts:
+  charm:
+    plugin: uv
+    source: .
+    build-snaps:
+      - astral-uv
+
+config:
+  options:
+    enable-machine-learning:
+      type: boolean
+      default: true
+      description: Enable the Immich machine-learning workload container.
+    storage-mode:
+      type: string
+      default: filesystem
+      description: |
+        Media storage mode. Supported values are "filesystem" and "s3".
+        Filesystem mode is single-unit only; multi-unit deployments require S3.
+    external-url:
+      type: string
+      default: ""
+      description: |
+        Public URL for Immich when ingress does not provide one yet.
+    log-level:
+      type: string
+      default: log
+      description: Immich log level, for example "log", "verbose", "debug", "warn", or "error".
+
+containers:
+  immich-server:
+    resource: immich-server-image
+    mounts:
+      - storage: uploads
+        location: /usr/src/app/upload
+
+resources:
+  immich-server-image:
+    type: oci-image
+    description: OCI image for the Immich server workload.
+    upstream-source: ghcr.io/immich-app/immich-server:release
+
+storage:
+  uploads:
+    type: filesystem
+    description: Filesystem storage for Immich uploads and media library data.
+
+requires:
+  database:
+    interface: postgresql_client
+    limit: 1
+  cache:
+    interface: redis
+    limit: 1
+  ingress:
+    interface: ingress
+    limit: 1
+    optional: true
+  logging:
+    interface: loki_push_api
+    optional: true
+  s3:
+    interface: s3
+    optional: false
+    limit: 1
+    description: |
+      The coordinator obtains and shares storage details with workers, enabling Mimir's access to an S3 bucket for data storage.
+
+provides:
+  metrics-endpoint:
+    interface: prometheus_scrape
+
+peers:
+  peers:
+    interface: immich_peers
