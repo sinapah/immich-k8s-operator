@@ -71,12 +71,13 @@ class RedisRequires(Object):
             return
 
         # Trigger an event that our charm can react to.
-        self.charm.on.redis_relation_updated.emit()
+        #self.charm.on.redis_relation_updated.emit()
 
     def _on_relation_broken(self, event):
         """Handle the relation broken event."""
         # Trigger an event that our charm can react to.
-        self.charm.on.redis_relation_updated.emit()
+        #self.charm.on.redis_relation_updated.emit()
+        pass
 
     @property
     def app_data(self) -> Optional[Dict[str, str]]:

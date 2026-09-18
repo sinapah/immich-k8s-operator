@@ -5,21 +5,25 @@
 """Charm for Immich on Juju Kubernetes."""
 
 import logging
-from typing import Any
+import socket
 from urllib.parse import urlparse
-from charms.traefik_k8s.v2.ingress import IngressPerAppReadyEvent, IngressPerAppRequirer
+
 import ops
+from charms.data_platform_libs.v0.data_interfaces import DatabaseRequires
+from charms.prometheus_k8s.v0.prometheus_scrape import MetricsEndpointProvider
+from charms.redis_k8s.v0.redis import RedisRequires
+from charms.traefik_k8s.v2.ingress import IngressPerAppRequirer
 
 logger = logging.getLogger(__name__)
 
 SERVER_CONTAINER = "immich-server"
-ML_CONTAINER = "immich-machine-learning"
 SERVER_SERVICE = "immich-server"
-ML_SERVICE = "immich-machine-learning"
 SERVER_PORT = 2283
-ML_PORT = 3003
 UPLOAD_LOCATION = "/usr/src/app/upload"
 SUPPORTED_STORAGE_MODES = {"filesystem", "s3"}
+METRICS_PATH = "/metrics"
+
+DATABASE_RELATION = "database"
 
 
 class ImmichK8SOperatorCharm(ops.CharmBase):
@@ -27,22 +31,51 @@ class ImmichK8SOperatorCharm(ops.CharmBase):
 
     def __init__(self, framework: ops.Framework):
         super().__init__(framework)
+
+        self._fqdn = socket.getfqdn()
+
         framework.observe(self.on.config_changed, self._reconcile)
         framework.observe(self.on[SERVER_CONTAINER].pebble_ready, self._reconcile)
-        framework.observe(self.on[ML_CONTAINER].pebble_ready, self._reconcile)
 
         self.ingress = IngressPerAppRequirer(
             charm=self,
             strip_prefix=True,
             scheme=lambda: urlparse(self.internal_url).scheme,
+            port=SERVER_PORT,
         )
-    
+
+        self.metrics_endpoint = MetricsEndpointProvider(
+            charm=self,
+            jobs=self._metrics_scrape_jobs,
+            refresh_event=[
+                self.on.update_status,
+            ],
+        )
+
+        self._db = DatabaseRequires(self, relation_name=DATABASE_RELATION, database_name="immich")
+        self.requirer = RedisRequires(self, relation_name="cache")
         for relation_name in ("database", "cache", "ingress"):
             relation_events = self.on[relation_name]
             framework.observe(relation_events.relation_changed, self._reconcile)
             framework.observe(relation_events.relation_broken, self._reconcile)
             framework.observe(relation_events.relation_departed, self._reconcile)
             framework.observe(relation_events.relation_joined, self._reconcile)
+        framework.observe(self._db.on.database_created, self._reconcile)
+        framework.observe(self._db.on.endpoints_changed, self._reconcile)
+
+    @property
+    def _scheme(self) -> str:
+        return "https" if self._tls_available else "http"
+
+    @property
+    def internal_url(self) -> str:
+        """Return workload's internal URL. Used for ingress."""
+        return f"http://{self._fqdn}:{SERVER_PORT}"
+
+    @property
+    def _tls_available(self) -> bool:
+        """Return True if TLS is available for the workload."""
+        pass
 
     def _reconcile(self, _: ops.EventBase) -> None:
         """Validate charm state and render Pebble layers when dependencies are ready."""
@@ -73,22 +106,6 @@ class ImmichK8SOperatorCharm(ops.CharmBase):
         )
         server.replan()
 
-        if self.config["enable-machine-learning"]:
-            machine_learning = self.unit.get_container(ML_CONTAINER)
-            if not machine_learning.can_connect():
-                self.unit.status = ops.WaitingStatus(
-                    "waiting for Immich machine-learning container"
-                )
-                return
-            machine_learning.add_layer(
-                "immich-machine-learning",
-                self._machine_learning_layer(),
-                combine=True,
-            )
-            machine_learning.replan()
-        else:
-            self._stop_machine_learning()
-
         self.unit.status = ops.ActiveStatus()
 
     def _validate_storage_config(self) -> ops.BlockedStatus | None:
@@ -99,7 +116,7 @@ class ImmichK8SOperatorCharm(ops.CharmBase):
                 f"unsupported storage-mode {storage_mode!r}; use filesystem or s3"
             )
 
-        if storage_mode == "filesystem" and self._unit_count() > 1:
+        if storage_mode == "filesystem" and self.app.planned_units() > 1:
             return ops.BlockedStatus("multi-unit deployments require S3-compatible storage")
 
         if storage_mode == "s3":
@@ -124,7 +141,6 @@ class ImmichK8SOperatorCharm(ops.CharmBase):
         environment = {
             "IMMICH_HOST": "0.0.0.0",
             "IMMICH_PORT": str(SERVER_PORT),
-            "IMMICH_MACHINE_LEARNING_URL": f"http://localhost:{ML_PORT}",
             "LOG_LEVEL": str(self.config["log-level"]),
             "UPLOAD_LOCATION": UPLOAD_LOCATION,
             **database_env,
@@ -154,37 +170,14 @@ class ImmichK8SOperatorCharm(ops.CharmBase):
             },
         }
 
-    def _machine_learning_layer(self) -> ops.pebble.LayerDict:
-        """Build the Immich machine-learning Pebble layer."""
-        return {
-            "summary": "Immich machine-learning layer",
-            "description": "Pebble layer for the Immich machine-learning workload.",
-            "services": {
-                ML_SERVICE: {
-                    "override": "replace",
-                    "summary": "Immich machine learning",
-                    "command": "start.sh machine-learning",
-                    "startup": "enabled",
-                    "environment": {
-                        "MACHINE_LEARNING_HOST": "0.0.0.0",
-                        "MACHINE_LEARNING_PORT": str(ML_PORT),
-                    },
-                }
-            },
-            "checks": {
-                "immich-machine-learning-ready": {
-                    "override": "replace",
-                    "level": "ready",
-                    "http": {"url": f"http://localhost:{ML_PORT}/ping"},
-                }
-            },
-        }
-
     def _database_environment(self) -> dict[str, str] | None:
         """Return Immich database environment variables when relation data is ready."""
-        data = self._remote_app_data("database")
-        if not data:
+        relation_data = self._db.fetch_relation_data()
+        if not relation_data:
             return None
+
+        relation_id = next(iter(relation_data))
+        data = relation_data[relation_id]
 
         host, port = self._host_port_from_data(data, default_port="5432")
         database = data.get("database") or data.get("database_name") or data.get("dbname")
@@ -204,7 +197,7 @@ class ImmichK8SOperatorCharm(ops.CharmBase):
 
     def _cache_environment(self) -> dict[str, str] | None:
         """Return Immich cache environment variables when relation data is ready."""
-        data = self._remote_app_data("cache")
+        data = self._remote_unit_data("cache")
         if not data:
             return None
 
@@ -253,20 +246,20 @@ class ImmichK8SOperatorCharm(ops.CharmBase):
             "S3_FORCE_PATH_STYLE": str(self.config["s3-force-path-style"]).lower(),
         }
 
-    def _stop_machine_learning(self) -> None:
-        """Stop the machine-learning Pebble service when it is disabled."""
-        machine_learning = self.unit.get_container(ML_CONTAINER)
-        if not machine_learning.can_connect():
-            return
-        if ML_SERVICE in machine_learning.get_services():
-            machine_learning.stop(ML_SERVICE)
-
     def _remote_app_data(self, relation_name: str) -> dict[str, str]:
         """Return remote application data for a relation."""
         relation = self.model.get_relation(relation_name)
         if relation is None or relation.app is None:
             return {}
         return dict(relation.data[relation.app])
+
+    def _remote_unit_data(self, relation_name: str) -> dict[str, str]:
+        """Return remote unit data for a relation."""
+        relation = self.model.get_relation("cache")
+        if not relation or not relation.units:
+            return None
+        unit = next(iter(relation.units))
+        return relation.data[unit]
 
     def _host_port_from_data(
         self,
@@ -292,9 +285,15 @@ class ImmichK8SOperatorCharm(ops.CharmBase):
         """Return the normalized storage mode."""
         return str(self.config["storage-mode"]).strip().lower()
 
-    def _unit_count(self) -> int:
-        """Return the current Juju application unit count."""
-        return len(self.model.app.units) + 1
+    @property
+    def _metrics_scrape_jobs(self) -> list:
+        parts = urlparse(self.internal_url)
+        job = {
+            "metrics_path": METRICS_PATH,
+            "static_configs": [{"targets": [parts.netloc]}],
+            "scheme": self._scheme,
+        }
+        return [job]
 
 
 if __name__ == "__main__":  # pragma: nocover

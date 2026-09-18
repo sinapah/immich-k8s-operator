@@ -51,7 +51,6 @@ config:
       type: string
       default: log
       description: Immich log level, for example "log", "verbose", "debug", "warn", or "error".
-    requires:
 
 containers:
   immich-server:
@@ -59,18 +58,12 @@ containers:
     mounts:
       - storage: uploads
         location: /usr/src/app/upload
-  immich-machine-learning:
-    resource: immich-machine-learning-image
 
 resources:
   immich-server-image:
     type: oci-image
     description: OCI image for the Immich server workload.
     upstream-source: ghcr.io/immich-app/immich-server:release
-  immich-machine-learning-image:
-    type: oci-image
-    description: OCI image for the Immich machine-learning workload.
-    upstream-source: ghcr.io/immich-app/immich-machine-learning:release
 
 storage:
   uploads:
