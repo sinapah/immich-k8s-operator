@@ -12,7 +12,7 @@ import ops
 from charms.data_platform_libs.v0.data_interfaces import DatabaseRequires
 from charms.prometheus_k8s.v0.prometheus_scrape import MetricsEndpointProvider
 from charms.redis_k8s.v0.redis import RedisRequires
-from charms.traefik_k8s.v2.ingress import IngressPerAppRequirer
+from charms.traefik_k8s.v2.ingress import IngressPerAppRequirer, IngressPerAppReadyEvent, IngressPerAppRevokedEvent
 
 logger = logging.getLogger(__name__)
 
@@ -34,16 +34,6 @@ class ImmichK8SOperatorCharm(ops.CharmBase):
 
         self._fqdn = socket.getfqdn()
 
-        framework.observe(self.on.config_changed, self._reconcile)
-        framework.observe(self.on[SERVER_CONTAINER].pebble_ready, self._reconcile)
-
-        self.ingress = IngressPerAppRequirer(
-            charm=self,
-            strip_prefix=True,
-            scheme=lambda: urlparse(self.internal_url).scheme,
-            port=SERVER_PORT,
-        )
-
         self.metrics_endpoint = MetricsEndpointProvider(
             charm=self,
             jobs=self._metrics_scrape_jobs,
@@ -52,8 +42,10 @@ class ImmichK8SOperatorCharm(ops.CharmBase):
             ],
         )
 
-        self._db = DatabaseRequires(self, relation_name=DATABASE_RELATION, database_name="immich")
+        self._db = DatabaseRequires(self, relation_name=DATABASE_RELATION, database_name="immich", extra_user_roles="superuser")
         self.requirer = RedisRequires(self, relation_name="cache")
+        self.ingress = IngressPerAppRequirer(self, port=SERVER_PORT, scheme=self._scheme, strip_prefix=True)
+
         for relation_name in ("database", "cache", "ingress"):
             relation_events = self.on[relation_name]
             framework.observe(relation_events.relation_changed, self._reconcile)
@@ -62,6 +54,10 @@ class ImmichK8SOperatorCharm(ops.CharmBase):
             framework.observe(relation_events.relation_joined, self._reconcile)
         framework.observe(self._db.on.database_created, self._reconcile)
         framework.observe(self._db.on.endpoints_changed, self._reconcile)
+        framework.observe(self.ingress.on.ready, self._reconcile)
+        framework.observe(self.ingress.on.revoked, self._reconcile)
+        framework.observe(self.on.config_changed, self._reconcile)
+        framework.observe(self.on[SERVER_CONTAINER].pebble_ready, self._reconcile)
 
     @property
     def _scheme(self) -> str:
@@ -98,6 +94,8 @@ class ImmichK8SOperatorCharm(ops.CharmBase):
         if cache_env is None:
             self.unit.status = ops.WaitingStatus("waiting for Redis-compatible relation")
             return
+
+        self.ingress.provide_ingress_requirements(scheme=self._scheme, port=SERVER_PORT)
 
         server.add_layer(
             "immich-server",
@@ -156,7 +154,7 @@ class ImmichK8SOperatorCharm(ops.CharmBase):
                 SERVER_SERVICE: {
                     "override": "replace",
                     "summary": "Immich server",
-                    "command": "start.sh immich",
+                    "command": "start.sh",
                     "startup": "enabled",
                     "environment": environment,
                 }
@@ -220,13 +218,7 @@ class ImmichK8SOperatorCharm(ops.CharmBase):
         """Return external URL environment when config or ingress data provides one."""
         external_url = str(self.config["external-url"]).strip()
         if not external_url:
-            ingress_data = self._remote_app_data("ingress")
-            external_url = (
-                ingress_data.get("url")
-                or ingress_data.get("external-url")
-                or ingress_data.get("ingress")
-            )
-
+            external_url = self.ingress.url
         if not external_url:
             return {}
 
