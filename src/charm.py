@@ -42,7 +42,7 @@ class ImmichK8SOperatorCharm(ops.CharmBase):
             ],
         )
 
-        self._db = DatabaseRequires(self, relation_name=DATABASE_RELATION, database_name="immich", extra_user_roles="superuser")
+        self._db = DatabaseRequires(self, relation_name=DATABASE_RELATION, database_name="immich")
         self.requirer = RedisRequires(self, relation_name="cache")
         self.ingress = IngressPerAppRequirer(self, port=SERVER_PORT, scheme=self._scheme, strip_prefix=True)
 
