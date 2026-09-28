@@ -12,7 +12,9 @@ import ops
 from charms.data_platform_libs.v0.data_interfaces import DatabaseRequires
 from charms.prometheus_k8s.v0.prometheus_scrape import MetricsEndpointProvider
 from charms.redis_k8s.v0.redis import RedisRequires
-from charms.traefik_k8s.v2.ingress import IngressPerAppRequirer, IngressPerAppReadyEvent, IngressPerAppRevokedEvent
+from charms.traefik_k8s.v2.ingress import (
+    IngressPerAppRequirer,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -42,9 +44,16 @@ class ImmichK8SOperatorCharm(ops.CharmBase):
             ],
         )
 
-        self._db = DatabaseRequires(self, relation_name=DATABASE_RELATION, database_name="immich")
+        self._db = DatabaseRequires(
+            self,
+            relation_name=DATABASE_RELATION,
+            database_name="immich",
+            extra_user_roles="superuser",
+        )
         self.requirer = RedisRequires(self, relation_name="cache")
-        self.ingress = IngressPerAppRequirer(self, port=SERVER_PORT, scheme=self._scheme, strip_prefix=True)
+        self.ingress = IngressPerAppRequirer(
+            self, port=SERVER_PORT, scheme=self._scheme, strip_prefix=True
+        )
 
         for relation_name in ("database", "cache", "ingress"):
             relation_events = self.on[relation_name]
@@ -52,7 +61,7 @@ class ImmichK8SOperatorCharm(ops.CharmBase):
             framework.observe(relation_events.relation_broken, self._reconcile)
             framework.observe(relation_events.relation_departed, self._reconcile)
             framework.observe(relation_events.relation_joined, self._reconcile)
-        framework.observe(self._db.on.database_created, self._reconcile)
+        framework.observe(self._db.on.database_created, self._on_database_created)
         framework.observe(self._db.on.endpoints_changed, self._reconcile)
         framework.observe(self.ingress.on.ready, self._reconcile)
         framework.observe(self.ingress.on.revoked, self._reconcile)
@@ -72,6 +81,62 @@ class ImmichK8SOperatorCharm(ops.CharmBase):
     def _tls_available(self) -> bool:
         """Return True if TLS is available for the workload."""
         pass
+
+    def _on_database_created(self, event: ops.EventBase) -> None:
+        """Transfer database ownership so Immich migrations can run ALTER DATABASE."""
+        self._fix_database_ownership(event)
+        self._reconcile(event)
+
+    def _fix_database_ownership(self, event: ops.EventBase) -> None:
+        """Run ALTER DATABASE ... OWNER TO charmed_<db>_owner as the superuser login role.
+
+        Charmed PostgreSQL's login_hook fires SET ROLE charmed_<db>_owner on every
+        connection, demoting the session from superuser to a non-owner role.  To escape
+        that, we RESET ROLE immediately after connecting (valid because the login role
+        itself has the superuser attribute), then transfer database ownership to the
+        charmed_<db>_owner role so that Immich's migration SQL
+        ``ALTER DATABASE ... SET search_path`` succeeds.
+        """
+        import psycopg
+
+        relation_data = self._db.fetch_relation_data()
+        if not relation_data:
+            logger.warning("_fix_database_ownership: no relation data yet, skipping")
+            return
+
+        relation_id = next(iter(relation_data))
+        data = relation_data[relation_id]
+
+        host, port = self._host_port_from_data(data, default_port="5432")
+        database = data.get("database") or data.get("database_name") or data.get("dbname")
+        username = data.get("username") or data.get("user")
+        password = data.get("password")
+
+        if not all((host, port, database, username, password)):
+            logger.warning("_fix_database_ownership: incomplete credentials, skipping")
+            return
+
+        owner_role = f"charmed_{database}_owner"
+        conninfo = (
+            f"host={host} port={port} dbname={database} "
+            f"user={username} password={password} sslmode=disable"
+        )
+        try:
+            with psycopg.connect(conninfo, autocommit=True) as conn:
+                # Escape the login_hook's SET ROLE by resetting back to the login
+                # role, which carries the superuser attribute.
+                conn.execute("RESET ROLE")
+                conn.execute(
+                    psycopg.sql.SQL("ALTER DATABASE {} OWNER TO {}").format(
+                        psycopg.sql.Identifier(database),
+                        psycopg.sql.Identifier(owner_role),
+                    )
+                )
+            logger.info("Transferred ownership of database %r to role %r", database, owner_role)
+        except Exception as exc:
+            logger.warning(
+                "Could not transfer database ownership (will retry on next event): %s", exc
+            )
 
     def _reconcile(self, _: ops.EventBase) -> None:
         """Validate charm state and render Pebble layers when dependencies are ready."""
