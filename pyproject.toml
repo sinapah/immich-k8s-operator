@@ -16,6 +16,7 @@ dependencies = [
     "ops~=3.7",
     "pydantic",
     "cosl",
+    "psycopg[binary]",
 ]
 
 [dependency-groups]
