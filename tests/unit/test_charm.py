@@ -3,93 +3,63 @@
 #
 # To learn more about testing, see https://documentation.ubuntu.com/ops/latest/explanation/testing/
 
-import ops
 import pytest
 from ops import testing
 
-from charm import SERVICE_NAME, ImmichK8SOperatorCharm
-
-CHECK_NAME = "service-ready"  # Name of Pebble check in the mock workload container.
-
-# A minimal Pebble layer for our testing.Container objects.
-# Our charm doesn't retrieve the service command or the check URL
-# from Pebble, so this layer doesn't need a real command or URL.
-MOCK_LAYER = ops.pebble.Layer(
-    {
-        "services": {
-            SERVICE_NAME: {
-                "override": "replace",
-                "command": "mock-command",
-                "startup": "enabled",
-            }
-        },
-        "checks": {
-            CHECK_NAME: {
-                "override": "replace",
-                "level": "ready",
-                "threshold": 3,
-                "startup": "enabled",
-                "http": {
-                    "url": "http://localhost:1234/mock-endpoint",
-                },
-            }
-        },
-    }
-)
+from charm import SERVER_SERVICE, ImmichK8SOperatorCharm
 
 
-def mock_get_version():
-    """Get a mock version string without executing the workload code."""
-    return "1.0.0"
+def test_metrics_scrape_jobs_ports():
+    harness = testing.Harness(ImmichK8SOperatorCharm)
+    harness.begin()
+    jobs = harness.charm._metrics_scrape_jobs
+
+    assert len(jobs) == 2
+
+    api_job = jobs[0]
+    assert api_job["job_name"] == "immich_api"
+    assert api_job["metrics_path"] == "/metrics"
+    assert api_job["static_configs"][0]["targets"][0].endswith(":8081")
+    assert api_job["scheme"] == "http"
+
+    micro_job = jobs[1]
+    assert micro_job["job_name"] == "immich_microservices"
+    assert micro_job["metrics_path"] == "/metrics"
+    assert micro_job["static_configs"][0]["targets"][0].endswith(":8082")
+    assert micro_job["scheme"] == "http"
+
+    harness.cleanup()
 
 
-def test_pebble_ready(monkeypatch: pytest.MonkeyPatch):
-    """Test that the charm has the correct state after handling the pebble-ready event."""
-    # Arrange:
-    ctx = testing.Context(ImmichK8SOperatorCharm)
-    check_in = testing.CheckInfo(
-        CHECK_NAME,
-        level=ops.pebble.CheckLevel.READY,
-        status=ops.pebble.CheckStatus.UP,  # Simulate the Pebble check passing.
-    )
-    container_in = testing.Container(
-        "some-container",
-        can_connect=True,
-        layers={"base": MOCK_LAYER},
-        service_statuses={SERVICE_NAME: ops.pebble.ServiceStatus.INACTIVE},
-        check_infos={check_in},
-    )
-    state_in = testing.State(containers={container_in})
-    monkeypatch.setattr("charm.immich.get_version", mock_get_version)
+def test_server_layer_sets_telemetry_when_metrics_relation_exists():
+    harness = testing.Harness(ImmichK8SOperatorCharm)
+    harness.add_relation("metrics-endpoint", "prometheus")
+    harness.begin()
+    layer = harness.charm._server_layer(database_env={}, cache_env={})
+    env = layer["services"][SERVER_SERVICE]["environment"]
 
-    # Act:
-    state_out = ctx.run(ctx.on.pebble_ready(container_in), state_in)
+    assert env["IMMICH_TELEMETRY_INCLUDE"] == "all"
 
-    # Assert:
-    container_out = state_out.get_container(container_in.name)
-    assert container_out.service_statuses[SERVICE_NAME] == ops.pebble.ServiceStatus.ACTIVE
-    assert state_out.workload_version is not None
-    assert state_out.unit_status == testing.ActiveStatus()
+    harness.cleanup()
 
 
-def test_pebble_ready_service_not_ready():
-    """Test that the charm raises an error if the workload isn't ready after Pebble starts it."""
-    # Arrange:
-    ctx = testing.Context(ImmichK8SOperatorCharm)
-    check_in = testing.CheckInfo(
-        CHECK_NAME,
-        level=ops.pebble.CheckLevel.READY,
-        status=ops.pebble.CheckStatus.DOWN,  # Simulate the Pebble check failing.
-    )
-    container_in = testing.Container(
-        "some-container",
-        can_connect=True,
-        layers={"base": MOCK_LAYER},
-        service_statuses={SERVICE_NAME: ops.pebble.ServiceStatus.INACTIVE},
-        check_infos={check_in},
-    )
-    state_in = testing.State(containers={container_in})
+def test_server_layer_omits_telemetry_without_metrics_relation():
+    harness = testing.Harness(ImmichK8SOperatorCharm)
+    harness.begin()
+    layer = harness.charm._server_layer(database_env={}, cache_env={})
+    env = layer["services"][SERVER_SERVICE]["environment"]
 
-    # Act & assert:
-    with pytest.raises(testing.errors.UncaughtCharmError):
-        ctx.run(ctx.on.pebble_ready(container_in), state_in)
+    assert "IMMICH_TELEMETRY_INCLUDE" not in env
+
+    harness.cleanup()
+
+
+def test_metrics_scrape_jobs_scheme_matches_charm_scheme():
+    harness = testing.Harness(ImmichK8SOperatorCharm)
+    harness.begin()
+    jobs = harness.charm._metrics_scrape_jobs
+
+    for job in jobs:
+        assert job["scheme"] == "http"
+
+    harness.cleanup()
