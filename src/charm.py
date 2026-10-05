@@ -6,7 +6,6 @@
 
 import logging
 import socket
-from urllib.parse import urlparse
 
 import ops
 from charms.data_platform_libs.v0.data_interfaces import DatabaseRequires
@@ -55,7 +54,7 @@ class ImmichK8SOperatorCharm(ops.CharmBase):
             self, port=SERVER_PORT, scheme=self._scheme, strip_prefix=True
         )
 
-        for relation_name in ("database", "cache", "ingress"):
+        for relation_name in ("database", "cache", "ingress", "metrics-endpoint"):
             relation_events = self.on[relation_name]
             framework.observe(relation_events.relation_changed, self._reconcile)
             framework.observe(relation_events.relation_broken, self._reconcile)
@@ -169,6 +168,8 @@ class ImmichK8SOperatorCharm(ops.CharmBase):
         )
         server.replan()
 
+        self.metrics_endpoint.update_scrape_job_spec(self._metrics_scrape_jobs)
+
         self.unit.status = ops.ActiveStatus()
 
     def _validate_storage_config(self) -> ops.BlockedStatus | None:
@@ -211,6 +212,9 @@ class ImmichK8SOperatorCharm(ops.CharmBase):
             **self._external_url_environment(),
             **self._s3_environment(),
         }
+
+        if self.model.relations.get("metrics-endpoint"):
+            environment["IMMICH_TELEMETRY_INCLUDE"] = "all"
 
         return {
             "summary": "Immich server layer",
@@ -344,13 +348,20 @@ class ImmichK8SOperatorCharm(ops.CharmBase):
 
     @property
     def _metrics_scrape_jobs(self) -> list:
-        parts = urlparse(self.internal_url)
-        job = {
-            "metrics_path": METRICS_PATH,
-            "static_configs": [{"targets": [parts.netloc]}],
-            "scheme": self._scheme,
-        }
-        return [job]
+        return [
+            {
+                "job_name": "immich_api",
+                "metrics_path": METRICS_PATH,
+                "static_configs": [{"targets": [f"{self._fqdn}:8081"]}],
+                "scheme": self._scheme,
+            },
+            {
+                "job_name": "immich_microservices",
+                "metrics_path": METRICS_PATH,
+                "static_configs": [{"targets": [f"{self._fqdn}:8082"]}],
+                "scheme": self._scheme,
+            },
+        ]
 
 
 if __name__ == "__main__":  # pragma: nocover
