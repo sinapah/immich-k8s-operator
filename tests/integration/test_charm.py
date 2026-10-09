@@ -9,20 +9,19 @@ import pathlib
 
 import jubilant
 import pytest
-import yaml
+from helpers import IMMICH_APP, assert_immich_active, deploy_immich_with_backends
 
 logger = logging.getLogger(__name__)
 
-METADATA = yaml.safe_load(pathlib.Path("charmcraft.yaml").read_text())
-
 
 def test_deploy(charm: pathlib.Path, juju: jubilant.Juju):
-    """Deploy the charm under test."""
-    resources = {
-        "immich-server-image": METADATA["resources"]["immich-server-image"]["upstream-source"]
-    }
-    juju.deploy(charm.resolve(), app="immich-k8s-operator", resources=resources)
-    juju.wait(jubilant.all_active)
+    """Deploy Immich with its required PostgreSQL and Redis backends and integrate them."""
+    deploy_immich_with_backends(juju, charm)
+
+
+def test_active(juju: jubilant.Juju):
+    """Check that Immich becomes active and idle once PostgreSQL and Redis are connected."""
+    assert_immich_active(juju)
 
 
 # If you implement immich.get_version in the charm source,
@@ -31,5 +30,5 @@ def test_deploy(charm: pathlib.Path, juju: jubilant.Juju):
 @pytest.mark.skip(reason="immich.get_version is not implemented")
 def test_workload_version_is_set(charm: pathlib.Path, juju: jubilant.Juju):
     """Check that the correct version of the workload is running."""
-    version = juju.status().apps["immich-k8s-operator"].version
+    version = juju.status().apps[IMMICH_APP].version
     assert version == "3.14"  # Replace 3.14 by the expected version of the workload.
