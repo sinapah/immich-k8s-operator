@@ -9,6 +9,7 @@ import socket
 
 import ops
 from charms.data_platform_libs.v0.data_interfaces import DatabaseRequires
+from charms.loki_k8s.v1.loki_push_api import LogForwarder
 from charms.prometheus_k8s.v0.prometheus_scrape import MetricsEndpointProvider
 from charms.redis_k8s.v0.redis import RedisRequires
 from charms.traefik_k8s.v2.ingress import (
@@ -53,6 +54,7 @@ class ImmichK8SOperatorCharm(ops.CharmBase):
         self.ingress = IngressPerAppRequirer(
             self, port=SERVER_PORT, scheme=self._scheme, strip_prefix=True
         )
+        self._log_forwarder = LogForwarder(self, relation_name="logging")
 
         for relation_name in ("database", "cache", "ingress", "metrics-endpoint"):
             relation_events = self.on[relation_name]
