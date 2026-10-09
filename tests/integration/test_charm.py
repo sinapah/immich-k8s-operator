@@ -9,62 +9,26 @@ import pathlib
 
 import jubilant
 import pytest
-import yaml
-from tenacity import retry, retry_if_exception_type, stop_after_delay, wait_fixed
+from helpers import IMMICH_APP, assert_immich_active, deploy_immich_with_backends
 
 logger = logging.getLogger(__name__)
-
-METADATA = yaml.safe_load(pathlib.Path("charmcraft.yaml").read_text())
-
-ACTIVE_TIMEOUT_SECONDS = 60 * 30
-ACTIVE_RETRY_INTERVAL_SECONDS = 10
 
 
 def test_deploy(charm: pathlib.Path, juju: jubilant.Juju):
     """Deploy Immich with its required PostgreSQL and Redis backends and integrate them."""
-    resources = {
-        "immich-server-image": METADATA["resources"]["immich-server-image"]["upstream-source"]
-    }
-    juju.deploy(
-        "postgresql-k8s",
-        app="pg",
-        channel="16/stable",
-        trust=True,
-        config={
-            "plugin-cube-enable": True,
-            "plugin-earthdistance-enable": True,
-            "plugin-vector-enable": True,
-        },
-    )
-    juju.deploy("redis-k8s", app="redis", channel="latest/edge", trust=True)
-    juju.deploy(
-        charm.resolve(),
-        app="immich",
-        resources=resources,
-        trust=True,
-        storage={"uploads": "1G"},
-    )
-
-    juju.integrate("redis:redis", "immich:cache")
-    juju.integrate("pg:database", "immich:database")
-
-
-@retry(
-    retry=retry_if_exception_type(AssertionError),
-    stop=stop_after_delay(ACTIVE_TIMEOUT_SECONDS),
-    wait=wait_fixed(ACTIVE_RETRY_INTERVAL_SECONDS),
-    reraise=True,
-)
-def _assert_immich_active(juju: jubilant.Juju) -> None:
-    """Assert that the apps are active and the Immich unit is active and idle."""
-    status = juju.status()
-    assert jubilant.all_active(status, "pg", "redis", "immich")
-    unit = status.apps["immich"].units["immich/0"]
-    assert unit.workload_status.current == "active"
-    assert unit.juju_status.current == "idle"
+    deploy_immich_with_backends(juju, charm)
 
 
 def test_active(juju: jubilant.Juju):
     """Check that Immich becomes active and idle once PostgreSQL and Redis are connected."""
-    _assert_immich_active(juju)
+    assert_immich_active(juju)
 
+
+# If you implement immich.get_version in the charm source,
+# remove the @pytest.mark.skip line to enable this test.
+# Alternatively, remove this test if you don't need it.
+@pytest.mark.skip(reason="immich.get_version is not implemented")
+def test_workload_version_is_set(charm: pathlib.Path, juju: jubilant.Juju):
+    """Check that the correct version of the workload is running."""
+    version = juju.status().apps[IMMICH_APP].version
+    assert version == "3.14"  # Replace 3.14 by the expected version of the workload.
