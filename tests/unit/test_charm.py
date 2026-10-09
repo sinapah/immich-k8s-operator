@@ -3,10 +3,15 @@
 #
 # To learn more about testing, see https://documentation.ubuntu.com/ops/latest/explanation/testing/
 
-import pytest
-from ops import testing
+from ops import pebble, testing
 
 from charm import SERVER_SERVICE, ImmichK8SOperatorCharm
+
+
+def _server_environment(layer: pebble.LayerDict) -> dict[str, str]:
+    """Return the environment of the Immich server service in a Pebble layer."""
+    services = layer.get("services", {})
+    return dict(services[SERVER_SERVICE].get("environment", {}))
 
 
 def test_metrics_scrape_jobs_ports():
@@ -35,8 +40,7 @@ def test_server_layer_sets_telemetry_when_metrics_relation_exists():
     harness = testing.Harness(ImmichK8SOperatorCharm)
     harness.add_relation("metrics-endpoint", "prometheus")
     harness.begin()
-    layer = harness.charm._server_layer(database_env={}, cache_env={})
-    env = layer["services"][SERVER_SERVICE]["environment"]
+    env = _server_environment(harness.charm._server_layer(database_env={}, cache_env={}))
 
     assert env["IMMICH_TELEMETRY_INCLUDE"] == "all"
 
@@ -46,8 +50,7 @@ def test_server_layer_sets_telemetry_when_metrics_relation_exists():
 def test_server_layer_omits_telemetry_without_metrics_relation():
     harness = testing.Harness(ImmichK8SOperatorCharm)
     harness.begin()
-    layer = harness.charm._server_layer(database_env={}, cache_env={})
-    env = layer["services"][SERVER_SERVICE]["environment"]
+    env = _server_environment(harness.charm._server_layer(database_env={}, cache_env={}))
 
     assert "IMMICH_TELEMETRY_INCLUDE" not in env
 

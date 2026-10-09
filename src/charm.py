@@ -81,7 +81,7 @@ class ImmichK8SOperatorCharm(ops.CharmBase):
     @property
     def _tls_available(self) -> bool:
         """Return True if TLS is available for the workload."""
-        pass
+        return False
 
     def _on_database_created(self, event: ops.EventBase) -> None:
         """Transfer database ownership so Immich migrations can run ALTER DATABASE."""
@@ -99,6 +99,7 @@ class ImmichK8SOperatorCharm(ops.CharmBase):
         ``ALTER DATABASE ... SET search_path`` succeeds.
         """
         import psycopg
+        from psycopg import sql
 
         relation_data = self._db.fetch_relation_data()
         if not relation_data:
@@ -113,7 +114,7 @@ class ImmichK8SOperatorCharm(ops.CharmBase):
         username = data.get("username") or data.get("user")
         password = data.get("password")
 
-        if not all((host, port, database, username, password)):
+        if not (host and port and database and username and password):
             logger.warning("_fix_database_ownership: incomplete credentials, skipping")
             return
 
@@ -128,9 +129,9 @@ class ImmichK8SOperatorCharm(ops.CharmBase):
                 # role, which carries the superuser attribute.
                 conn.execute("RESET ROLE")
                 conn.execute(
-                    psycopg.sql.SQL("ALTER DATABASE {} OWNER TO {}").format(
-                        psycopg.sql.Identifier(database),
-                        psycopg.sql.Identifier(owner_role),
+                    sql.SQL("ALTER DATABASE {} OWNER TO {}").format(
+                        sql.Identifier(database),
+                        sql.Identifier(owner_role),
                     )
                 )
             logger.info("Transferred ownership of database %r to role %r", database, owner_role)
@@ -252,7 +253,7 @@ class ImmichK8SOperatorCharm(ops.CharmBase):
         database = data.get("database") or data.get("database_name") or data.get("dbname")
         username = data.get("username") or data.get("user")
         password = data.get("password")
-        if not all((host, port, database, username, password)):
+        if not (host and port and database and username and password):
             logger.info("PostgreSQL relation data is incomplete")
             return None
 
@@ -316,13 +317,13 @@ class ImmichK8SOperatorCharm(ops.CharmBase):
             return {}
         return dict(relation.data[relation.app])
 
-    def _remote_unit_data(self, relation_name: str) -> dict[str, str]:
+    def _remote_unit_data(self, relation_name: str) -> dict[str, str] | None:
         """Return remote unit data for a relation."""
-        relation = self.model.get_relation("cache")
+        relation = self.model.get_relation(relation_name)
         if not relation or not relation.units:
             return None
         unit = next(iter(relation.units))
-        return relation.data[unit]
+        return dict(relation.data[unit])
 
     def _host_port_from_data(
         self,
