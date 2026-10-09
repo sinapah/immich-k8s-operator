@@ -1,0 +1,210 @@
+name: Release Charm
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: "Channel to release to (e.g. 'latest/edge', '1/edge')"
+        required: false
+        default: ""
+  push:
+    branches:
+      - main
+      - track/**
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  ci-ignore:
+    name: Check changes
+    runs-on: ubuntu-latest
+    outputs:
+      any_modified: ${{ steps.echo-changes.outputs.any_modified }}
+    steps:
+      - name: Checkout
+        if: github.event_name != 'workflow_dispatch'
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Checkout (dispatch)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/checkout@v6
+
+      - name: Determine changed files
+        if: github.event_name != 'workflow_dispatch'
+        id: changed-files
+        uses: tj-actions/changed-files@v47
+        with:
+          files_ignore: |
+            README.md
+            CONTRIBUTING.md
+            CODEOWNERS
+            LICENSE
+            icon.svg
+            .gitignore
+            .github/**
+            CHANGELOG.md
+
+      - name: Echo changed files
+        id: echo-changes
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "any_modified=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "any_modified=${{ steps.changed-files.outputs.any_modified }}" >> "$GITHUB_OUTPUT"
+          fi
+
+  lint:
+    name: Lint
+    needs: [ci-ignore]
+    if: needs.ci-ignore.outputs.any_modified == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v5
+      - run: uvx tox -e lint
+
+  static:
+    name: Static analysis
+    needs: [ci-ignore]
+    if: needs.ci-ignore.outputs.any_modified == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v5
+      - run: uvx tox -e static
+
+  unit:
+    name: Unit tests
+    needs: [ci-ignore]
+    if: needs.ci-ignore.outputs.any_modified == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v5
+      - run: uvx tox -e unit
+
+  define-channel:
+    name: Determine release channel
+    needs: [ci-ignore]
+    if: needs.ci-ignore.outputs.any_modified == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      channel: ${{ steps.define.outputs.channel }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Define release channel
+        id: define
+        env:
+          BRANCH: ${{ github.ref_name }}
+          INPUT_CHANNEL: ${{ inputs.channel || '' }}
+        run: |
+          if [[ -n "$INPUT_CHANNEL" ]]; then
+            channel="$INPUT_CHANNEL"
+          elif [[ "$BRANCH" == "main" ]]; then
+            channel="latest/edge"
+          elif [[ "${BRANCH#track/}" != "$BRANCH" ]]; then
+            channel="${BRANCH#track/}/edge"
+          else
+            echo "::error::Cannot determine release channel from branch '$BRANCH'"
+            exit 1
+          fi
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+
+  pack:
+    name: Pack charm
+    needs: [lint, static, unit]
+    if: needs.ci-ignore.outputs.any_modified == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      artifact-name: ${{ steps.pack.outputs.artifact-name }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/cache@v5
+        with:
+          path: /home/runner/snap/charmcraft/common/cache/charmcraft
+          key: ${{ runner.os }}-wheel-cache-${{ hashFiles('./uv.lock') }}
+          restore-keys: ${{ runner.os }}-wheel-cache-
+      - name: Setup LXD
+        uses: canonical/setup-lxd@main
+      - name: Install charmcraft
+        run: sudo snap install charmcraft --classic
+      - name: Pack charm
+        id: pack
+        run: |
+          charmcraft pack -v
+          echo "artifact-name=charms-release" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v6
+        with:
+          name: ${{ steps.pack.outputs.artifact-name }}
+          path: ./*.charm
+
+  release:
+    name: Release to Charmhub
+    needs: [ci-ignore, define-channel, pack]
+    if: needs.ci-ignore.outputs.any_modified == 'true'
+    runs-on: ubuntu-latest
+    env:
+      CHARMCRAFT_AUTH: ${{ secrets.CHARMCRAFT_AUTH }}
+      CHANNEL: ${{ needs.define-channel.outputs.channel }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Install tools
+        run: sudo snap install charmcraft --classic
+
+      - uses: actions/download-artifact@v7
+        with:
+          name: ${{ needs.pack.outputs.artifact-name }}
+
+      - name: Extract charm name
+        id: charm-name
+        run: |
+          charm_name=$(grep '^name:' charmcraft.yaml | head -1 | sed 's/name:\s*//')
+          echo "name=$charm_name" >> "$GITHUB_OUTPUT"
+
+      - name: Upload charm and release
+        id: upload
+        run: |
+          set -x
+          charm_file=$(find . -maxdepth 1 -name '*.charm' | head -1)
+          charm_name="${{ steps.charm-name.outputs.name }}"
+
+          echo "Uploading $charm_file"
+          upload_output=$(charmcraft upload "$charm_file" 2>&1)
+          revision=$(echo "$upload_output" | grep -oP 'Revision \K\d+')
+          echo "Uploaded revision: $revision"
+          echo "revision=$revision" >> "$GITHUB_OUTPUT"
+
+          echo "Releasing $charm_name revision $revision to $CHANNEL"
+          charmcraft release "$charm_name" --revision="$revision" --channel="$CHANNEL"
+
+      - name: Create git tag
+        env:
+          REVISION: ${{ steps.upload.outputs.revision }}
+        run: |
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          tag_message=$(git log -1 --pretty=%B)
+          git tag --annotate "rev${REVISION}" --message="$tag_message"
+          git push origin "rev${REVISION}"
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REVISION: ${{ steps.upload.outputs.revision }}
+          CHARM_NAME: ${{ steps.charm-name.outputs.name }}
+        run: |
+          gh release create "rev${REVISION}" \
+            --title="Revision ${REVISION}" \
+            --notes="Released **${CHARM_NAME}** revision ${REVISION} to \`${CHANNEL}\`." \
+            --generate-notes

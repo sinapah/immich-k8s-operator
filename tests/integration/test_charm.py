@@ -19,7 +19,7 @@ METADATA = yaml.safe_load(pathlib.Path("charmcraft.yaml").read_text())
 def test_deploy(charm: pathlib.Path, juju: jubilant.Juju):
     """Deploy the charm under test."""
     resources = {
-        "some-container-image": METADATA["resources"]["some-container-image"]["upstream-source"]
+        "immich-server-image": METADATA["resources"]["immich-server-image"]["upstream-source"]
     }
     juju.deploy(charm.resolve(), app="immich-k8s-operator", resources=resources)
     juju.wait(jubilant.all_active)
