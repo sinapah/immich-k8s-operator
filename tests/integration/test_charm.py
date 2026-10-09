@@ -8,7 +8,6 @@ import logging
 import pathlib
 
 import jubilant
-import pytest
 import yaml
 from tenacity import retry, retry_if_exception_type, stop_after_delay, wait_fixed
 
@@ -67,4 +66,3 @@ def _assert_immich_active(juju: jubilant.Juju) -> None:
 def test_active(juju: jubilant.Juju):
     """Check that Immich becomes active and idle once PostgreSQL and Redis are connected."""
     _assert_immich_active(juju)
-
