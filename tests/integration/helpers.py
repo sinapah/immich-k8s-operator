@@ -25,12 +25,9 @@ RETRY_INTERVAL_SECONDS = 10
 
 
 def retry_until_passing(func):
-    """Retry a check until it passes or the timeout elapses.
-
-    Retries on assertion failures and on network errors, since the endpoints may not be up yet.
-    """
+    """Retry an assertion-based check until it passes or the timeout elapses."""
     return retry(
-        retry=retry_if_exception_type((AssertionError, OSError)),
+        retry=retry_if_exception_type(AssertionError),
         stop=stop_after_delay(RETRY_TIMEOUT_SECONDS),
         wait=wait_fixed(RETRY_INTERVAL_SECONDS),
         reraise=True,
