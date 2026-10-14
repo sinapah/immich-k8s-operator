@@ -142,6 +142,7 @@ jobs:
       - name: Setup Juju
         run: |
           sudo snap install juju --channel=3.6/stable
+          sudo usermod -a -G snap_microk8s "$USER"
           mkdir -p ~/.kube
           sudo microk8s config > ~/.kube/config
           sudo chown "$USER" ~/.kube/config
@@ -153,10 +154,10 @@ jobs:
       - name: Bootstrap Juju and run tests
         run: |
           charm_path="$(realpath "$(find . -maxdepth 1 -name '*.charm' | head -1)")"
-          juju bootstrap microk8s --model-default automatically-retry-hooks=true
-          CHARM_PATH="$charm_path" uvx tox -e integration -- -k '${{ matrix.suite }}'
+          sg snap_microk8s -c "juju bootstrap microk8s --model-default automatically-retry-hooks=true"
+          sg snap_microk8s -c "CHARM_PATH='$charm_path' uvx tox -e integration -- -k '${{ matrix.suite }}'"
 
       - name: Collect logs on failure
         if: failure()
         run: |
-          juju debug-log --replay --limit 1000 || true
+          sg snap_microk8s -c "juju debug-log --replay --limit 1000" || true
