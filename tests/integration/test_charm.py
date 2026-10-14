@@ -8,8 +8,7 @@ import logging
 import pathlib
 
 import jubilant
-import pytest
-from helpers import IMMICH_APP, assert_immich_active, deploy_immich_with_backends
+from helpers import assert_immich_active, deploy_immich_with_backends
 
 logger = logging.getLogger(__name__)
 
@@ -21,4 +20,4 @@ def test_deploy(charm: pathlib.Path, juju: jubilant.Juju):
 
 def test_active(juju: jubilant.Juju):
     """Check that Immich becomes active and idle once PostgreSQL and Redis are connected."""
-    _assert_immich_active(juju)
+    assert_immich_active(juju)
