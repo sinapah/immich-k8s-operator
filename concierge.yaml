@@ -1,0 +1,29 @@
+juju:
+  # The default 20-minute bootstrap timeout is too short for the controller
+  # pod to expose its API on slow CI runners.
+  extra-bootstrap-args: --config bootstrap-timeout=1800
+  model-defaults:
+    test-mode: "true"
+    automatically-retry-hooks: "true"
+
+providers:
+  lxd:
+    enable: true
+  microk8s:
+    enable: true
+    bootstrap: true
+    addons:
+      - hostpath-storage
+      - dns
+      - rbac
+
+host:
+  packages:
+    - gnome-keyring
+    - python3-pip
+    - python3-venv
+  snaps:
+    charmcraft:
+    jq:
+    yq:
+    rockcraft:

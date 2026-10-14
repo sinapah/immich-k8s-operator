@@ -146,6 +146,7 @@ integration = [
     { name = "jubilant" },
     { name = "pytest" },
     { name = "pyyaml" },
+    { name = "tenacity" },
 ]
 lint = [
     { name = "codespell" },
@@ -171,6 +172,7 @@ integration = [
     { name = "jubilant" },
     { name = "pytest" },
     { name = "pyyaml" },
+    { name = "tenacity" },
 ]
 lint = [
     { name = "codespell" },
