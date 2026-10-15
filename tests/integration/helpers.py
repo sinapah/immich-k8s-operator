@@ -85,5 +85,5 @@ def get_json(url: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
     full_url = url
     if params:
         full_url = f"{url}?{urllib.parse.urlencode(params)}"
-    with urllib.request.urlopen(full_url, timeout=30) as response:  # noqa: S310
+    with urllib.request.urlopen(full_url, timeout=30) as response:
         return json.loads(response.read().decode())
