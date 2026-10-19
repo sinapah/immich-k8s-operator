@@ -42,11 +42,6 @@ config:
       description: |
         Media storage mode. Supported values are "filesystem" and "s3".
         Filesystem mode is single-unit only; multi-unit deployments require S3.
-    external-url:
-      type: string
-      default: ""
-      description: |
-        Public URL for Immich when ingress does not provide one yet.
     log-level:
       type: string
       default: log
