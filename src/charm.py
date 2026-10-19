@@ -9,6 +9,7 @@ import socket
 
 import ops
 from charms.data_platform_libs.v0.data_interfaces import DatabaseRequires
+from charms.grafana_k8s.v0.grafana_dashboard import GrafanaDashboardProvider
 from charms.loki_k8s.v1.loki_push_api import LogForwarder
 from charms.prometheus_k8s.v0.prometheus_scrape import MetricsEndpointProvider
 from charms.redis_k8s.v0.redis import RedisRequires
@@ -43,6 +44,8 @@ class ImmichK8SOperatorCharm(ops.CharmBase):
                 self.on.update_status,
             ],
         )
+
+        self.grafana_dashboards = GrafanaDashboardProvider(self)
 
         self._db = DatabaseRequires(
             self,
