@@ -58,7 +58,7 @@ resources:
   immich-server-image:
     type: oci-image
     description: OCI image for the Immich server workload.
-    upstream-source: ghcr.io/immich-app/immich-server:release
+    upstream-source: ghcr.io/immich-app/immich-server:v3.2.0
 
 storage:
   uploads:

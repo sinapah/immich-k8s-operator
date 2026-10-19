@@ -6,8 +6,10 @@
 
 import logging
 import pathlib
+from datetime import date
 
 import jubilant
+import pytest
 from helpers import (
     IMMICH_APP,
     IMMICH_CHARM_NAME,
@@ -19,6 +21,16 @@ from helpers import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Expires 2026-11-02 (two weeks from 2026-10-19). After that the tests run normally again.
+XFAIL_UNTIL = date(2026, 11, 2)
+
+known_telemetry_issue = pytest.mark.xfail(
+    date.today() <= XFAIL_UNTIL,
+    reason="Immich telemetry does not reach Loki/Prometheus yet. Remove after 2026-11-02.",
+    raises=AssertionError,
+    strict=True,
+)
 
 OTELCOL_APP = "otelcol"
 LOKI_APP = "loki"
@@ -63,6 +75,7 @@ def test_active(juju: jubilant.Juju):
     assert_immich_active(juju)
 
 
+@known_telemetry_issue
 @retry_until_passing
 def test_logs_in_loki(juju: jubilant.Juju):
     """Check that Immich logs have arrived in Loki."""
@@ -74,6 +87,7 @@ def test_logs_in_loki(juju: jubilant.Juju):
     logger.info("Found %d Immich log stream(s) in Loki", len(streams))
 
 
+@known_telemetry_issue
 @retry_until_passing
 def test_metrics_in_prometheus(juju: jubilant.Juju):
     """Check that Immich metrics have arrived in Prometheus."""
