@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 SERVER_CONTAINER = "immich-server"
 SERVER_SERVICE = "immich-server"
 SERVER_PORT = 2283
-UPLOAD_LOCATION = "/usr/src/app/upload"
+MEDIA_LOCATION = "/usr/src/app/upload"
 SUPPORTED_STORAGE_MODES = {"filesystem", "s3"}
 METRICS_PATH = "/metrics"
 
@@ -55,7 +55,7 @@ class ImmichK8SOperatorCharm(ops.CharmBase):
         )
         self.requirer = RedisRequires(self, relation_name="cache")
         self.ingress = IngressPerAppRequirer(
-            self, port=SERVER_PORT, scheme=self._scheme, strip_prefix=True
+            self, port=SERVER_PORT, scheme=self._scheme, strip_prefix=False
         )
         self._log_forwarder = LogForwarder(self, relation_name="logging")
 
@@ -211,11 +211,11 @@ class ImmichK8SOperatorCharm(ops.CharmBase):
         environment = {
             "IMMICH_HOST": "0.0.0.0",
             "IMMICH_PORT": str(SERVER_PORT),
-            "LOG_LEVEL": str(self.config["log-level"]),
-            "UPLOAD_LOCATION": UPLOAD_LOCATION,
+            "IMMICH_LOG_LEVEL": str(self.config["log-level"]),
+            "IMMICH_MEDIA_LOCATION": MEDIA_LOCATION,
+            "IMMICH_TRUSTED_PROXIES": "10.0.0.0/8",
             **database_env,
             **cache_env,
-            **self._external_url_environment(),
             **self._s3_environment(),
         }
 
@@ -288,16 +288,6 @@ class ImmichK8SOperatorCharm(ops.CharmBase):
         if password := data.get("password"):
             environment["REDIS_PASSWORD"] = password
         return environment
-
-    def _external_url_environment(self) -> dict[str, str]:
-        """Return external URL environment when config or ingress data provides one."""
-        external_url = str(self.config["external-url"]).strip()
-        if not external_url:
-            external_url = self.ingress.url
-        if not external_url:
-            return {}
-
-        return {"IMMICH_SERVER_URL": external_url}
 
     def _s3_environment(self) -> dict[str, str]:
         """Return S3-related environment variables when S3 storage is configured."""
