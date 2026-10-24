@@ -76,7 +76,7 @@ variable "immich" {
   description = "Application configuration for Immich. Only one unit is supported: media is stored on filesystem storage, which is single-unit only."
   type = object({
     app_name           = optional(string, "immich")
-    channel            = optional(string, "latest/edge")
+    channel            = optional(string, "3.2/stable")
     config             = optional(map(string), {})
     constraints        = optional(string, "arch=amd64")
     resources          = optional(map(string), {})
