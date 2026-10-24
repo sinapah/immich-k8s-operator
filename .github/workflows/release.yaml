@@ -152,7 +152,7 @@ jobs:
     if: needs.ci-ignore.outputs.any_modified == 'true'
     runs-on: ubuntu-latest
     env:
-      CHARMCRAFT_AUTH: ${{ secrets.CHARMCRAFT_AUTH }}
+      CHARMHUB_TOKEN: ${{ secrets.CHARMHUB_TOKEN }}
       CHANNEL: ${{ needs.define-channel.outputs.channel }}
     steps:
       - uses: actions/checkout@v6
