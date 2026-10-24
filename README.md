@@ -1,26 +1,53 @@
-<!--
-Avoid using this README file for information that is maintained or published elsewhere, e.g.:
+# immich-k8s
 
-* charmcraft.yaml > published on Charmhub
-* documentation > published on (or linked to from) Charmhub
-* detailed contribution guide > documentation or CONTRIBUTING.md
+Charmhub package name: immich-k8s
+More information: https://charmhub.io/immich-k8s
 
-Use links instead.
--->
+This charm operates [Immich](https://immich.app), a self-hosted photo and video management application, on Juju Kubernetes.
 
-# immich-k8s-operator
+## What does this charm do?
 
-Charmhub package name: immich-k8s-operator
-More information: https://charmhub.io/immich-k8s-operator
+This charm deploys and manages the Immich server workload with an optional machine-learning sidecar. It does not embed PostgreSQL or Redis; both are provided through Juju relations.
 
-Describe your charm in one or two sentences.
+The charm offers:
+
+1. Database and cache integration. Requires PostgreSQL (`database`) and Redis or Valkey (`cache`).
+2. Media storage. Filesystem storage for single-unit deployments, or S3-compatible storage configured through charm config for multi-unit deployments.
+3. Ingress. Optional `ingress` relation to expose Immich externally.
+4. Observability. A `metrics-endpoint` (Prometheus scrape), a `grafana-dashboard` provider, and optional `logging` (Loki push API).
+
+## Deploying with Terraform
+
+The `terraform/` directory contains a root module that deploys Immich together with PostgreSQL, Redis, and optionally Traefik, self-signed-certificates, and COS Lite.
+
+Prerequisites:
+- A bootstrapped Juju controller, with the Juju Terraform provider able to access it.
+- Network access, since the module pulls Traefik, self-signed-certificates, and OpenTelemetry Collector modules from GitHub.
+
+Steps:
+
+```bash
+cd terraform
+terraform init
+terraform apply -var-file=my.tfvars
+```
+
+A minimal `my.tfvars`:
+
+```hcl
+model = {
+  name = "immich"
+}
+
+ingress       = true
+observability = false
+```
+
+See `terraform/variables.tf` for all options, including `tls`, `observability`, `cos_ingress`, and per-application configuration. `terraform/test.tfvars` shows a complete example.
+
+> Note: `immich.units` must be `1`. Filesystem media storage supports only a single unit.
 
 ## Other resources
 
-<!-- If your charm is documented somewhere else other than Charmhub, provide a link separately. -->
-
-- [Read more](https://example.com)
-
-- [Contributing](CONTRIBUTING.md) <!-- or link to other contribution documentation -->
-
+- [Contributing](CONTRIBUTING.md)
 - See the [Juju documentation](https://documentation.ubuntu.com/juju/3.6/howto/manage-charms/) for more information about developing and improving charms.
