@@ -69,6 +69,8 @@ Requirements:
 
 ## Ingress relation
 
+The `ingress` relation is provided by one of two ingress providers, selected by the Terraform `ingress_provider` variable: Traefik or Tailscale.
+
 ### Traefik ingress
 
 Purpose:
@@ -90,13 +92,39 @@ Expected behavior:
 - The charm sends Immich service information to Traefik.
 - The default workload port is `2283`.
 - When ingress data is ready, the charm configures Immich's external URL from the ingress endpoint.
-- TLS termination is expected to be handled by the ingress provider.
+- TLS termination is expected to be handled by the ingress provider. With `tls` enabled in Terraform, self-signed-certificates signs Traefik's certificates.
 
 Implementation considerations:
 
 - Immich needs large upload support, so ingress body-size/proxy limits must be documented or configured if the interface supports it.
 - Websocket behavior should be validated through the selected ingress provider.
 - If ingress is absent or incomplete, the charm should either use a documented manual external URL fallback or report a clear waiting/blocked status according to the final implementation choice.
+
+### Tailscale ingress
+
+Purpose:
+
+```text
+Expose Immich on the tailnet through tailscale-beacon-k8s.
+```
+
+Expected direction:
+
+```text
+immich-k8s:ingress -> tailscale-beacon-k8s:ingress
+```
+
+Expected behavior:
+
+- tailscale-beacon-k8s is deployed in the Immich model. It creates a `LoadBalancer` Service with `loadBalancerClass: tailscale` for the Immich app.
+- tailscale-k8s runs in a separate tailscale model on the same Kubernetes cluster and reconciles those Services onto the tailnet. The two charms have no direct relation; coordination is through the Service.
+- The beacon publishes an `http://<tailnet-hostname>[:<listen-port>]/` URL, which the charm uses as Immich's external URL.
+- TLS is not provided on this path. `tls` requires `ingress_provider = "traefik"`.
+
+Implementation considerations:
+
+- tailscale-k8s reads its OAuth credentials from a Juju secret in the tailscale model. The Terraform module creates it and grants it to tailscale-k8s.
+- Destroy ordering: tailscale-k8s must not be removed while `loadBalancerClass: tailscale` Services exist. The Terraform module destroys the beacon first. Manual teardown should wait for those Services to disappear.
 
 ## Observability relations
 
@@ -236,5 +264,5 @@ The charm should remain active without optional relations:
 - logging
 - metrics scraping consumer
 
-Ingress behavior depends on the final external-access policy, but the preferred design is to support Traefik ingress and configure Immich's external URL from it.
+Ingress behavior depends on the final external-access policy. The charm supports Traefik ingress and Tailscale ingress (via tailscale-beacon-k8s) through the same `ingress` relation, and configures Immich's external URL from whichever is related.
 

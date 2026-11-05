@@ -103,3 +103,39 @@ module "opentelemetry_collector" {
   storage_directives = var.opentelemetry_collector.storage_directives
   units              = var.opentelemetry_collector.units
 }
+
+# -------------- # Tailscale ingress --------------
+
+module "tailscale" {
+  source = "git::https://github.com/canonical/service-mesh//charms/tailscale-k8s/terraform?depth=1"
+  count  = local.tailscale_enabled ? 1 : 0
+
+  app_name           = var.tailscale.app_name
+  channel            = local.channels.tailscale
+  config             = merge(var.tailscale.config, { credentials = juju_secret.tailscale_credentials[0].secret_id })
+  constraints        = var.tailscale.constraints
+  model_uuid         = local.tailscale_model_uuid
+  revision           = var.tailscale.revision
+  storage_directives = var.tailscale.storage_directives
+  units              = var.tailscale.units
+
+  # Config references the secret ID only; the grant is created after this app (see secrets.tf).
+}
+
+module "tailscale_beacon" {
+  source = "git::https://github.com/canonical/service-mesh//charms/tailscale-beacon-k8s/terraform?depth=1"
+  count  = local.tailscale_enabled ? 1 : 0
+
+  app_name    = var.tailscale_beacon.app_name
+  channel     = local.channels.tailscale_beacon
+  config      = var.tailscale_beacon.config
+  constraints = var.tailscale_beacon.constraints
+  model_uuid  = local.model_uuid
+  revision    = var.tailscale_beacon.revision
+  units       = var.tailscale_beacon.units
+
+  # Destroy ordering: the beacon owns the LoadBalancer Services that tailscale-k8s
+  # reconciles. Terraform destroys dependents first, so depending on module.tailscale
+  # makes the beacon go before tailscale-k8s, which avoids stuck Service finalizers.
+  depends_on = [module.tailscale]
+}
