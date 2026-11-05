@@ -3,6 +3,11 @@ output "model_uuid" {
   description = "The UUID of the Immich model (created or looked up)."
 }
 
+output "tailscale_model_uuid" {
+  value       = local.tailscale_model_uuid
+  description = "The UUID of the tailscale-k8s model (created or looked up), or null unless `ingress_provider` is `tailscale`."
+}
+
 output "cos_model_uuid" {
   value       = local.observability_on ? module.cos_lite[0].model_uuid : null
   description = "The UUID of the COS Lite model, or null when observability is disabled."
@@ -10,12 +15,14 @@ output "cos_model_uuid" {
 
 output "applications" {
   value = {
-    immich     = juju_application.immich.name
-    postgresql = juju_application.postgresql.name
-    redis      = juju_application.redis.name
-    traefik    = local.traefik_enabled ? module.traefik[0].app_name : null
-    ssc        = local.ssc_enabled ? module.ssc[0].app_name : null
-    otelcol    = local.observability_on ? module.opentelemetry_collector[0].app_name : null
+    immich           = juju_application.immich.name
+    postgresql       = juju_application.postgresql.name
+    redis            = juju_application.redis.name
+    traefik          = local.traefik_enabled ? module.traefik[0].app_name : null
+    tailscale_beacon = local.tailscale_enabled ? module.tailscale_beacon[0].app_name : null
+    tailscale        = local.tailscale_enabled ? module.tailscale[0].app_name : null
+    ssc              = local.ssc_enabled ? module.ssc[0].app_name : null
+    otelcol          = local.observability_on ? module.opentelemetry_collector[0].app_name : null
   }
-  description = "Application names deployed in the Immich model. Null entries are disabled by feature toggles."
+  description = "Application names deployed by this module. Null entries are disabled by feature toggles."
 }
