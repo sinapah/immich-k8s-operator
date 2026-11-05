@@ -119,8 +119,7 @@ module "tailscale" {
   storage_directives = var.tailscale.storage_directives
   units              = var.tailscale.units
 
-  # The grant must exist before tailscale-k8s starts reading the secret.
-  depends_on = [juju_access_secret.tailscale_credentials]
+  # Config references the secret ID only; the grant is created after this app (see secrets.tf).
 }
 
 module "tailscale_beacon" {

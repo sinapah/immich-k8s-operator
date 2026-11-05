@@ -13,12 +13,11 @@ resource "juju_secret" "tailscale_credentials" {
   }
 }
 
-# The grant uses the app name from variables, not module output, to avoid a cycle:
-# module.tailscale depends on this grant.
+# The grant must follow the application: Juju rejects a grant to an app that does not exist yet.
 resource "juju_access_secret" "tailscale_credentials" {
   count = local.tailscale_enabled ? 1 : 0
 
   model_uuid   = local.tailscale_model_uuid
   secret_id    = juju_secret.tailscale_credentials[0].secret_id
-  applications = [var.tailscale.app_name]
+  applications = [module.tailscale[0].app_name]
 }
