@@ -59,7 +59,7 @@ resource "juju_application" "redis" {
 }
 
 module "traefik" {
-  source = "git::https://github.com/canonical/traefik-k8s-operator//terraform"
+  source = "git::https://github.com/canonical/traefik-k8s-operator//terraform?depth=1"
   count  = local.traefik_enabled ? 1 : 0
 
   app_name           = var.traefik.app_name
@@ -75,7 +75,7 @@ module "traefik" {
 }
 
 module "ssc" {
-  source = "git::https://github.com/canonical/self-signed-certificates-operator//terraform"
+  source = "git::https://github.com/canonical/self-signed-certificates-operator//terraform?depth=1"
   count  = local.ssc_enabled ? 1 : 0
 
   app_name    = var.ssc.app_name
@@ -89,7 +89,7 @@ module "ssc" {
 }
 
 module "opentelemetry_collector" {
-  source = "git::https://github.com/canonical/opentelemetry-collector-k8s-operator//terraform"
+  source = "git::https://github.com/canonical/opentelemetry-collector-k8s-operator//terraform?depth=1"
   count  = local.observability_on ? 1 : 0
 
   app_name           = var.opentelemetry_collector.app_name
