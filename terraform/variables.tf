@@ -37,20 +37,25 @@ variable "cos_model" {
 # -------------- # Feature toggles --------------
 
 variable "tls" {
-  description = "Enable TLS. When true, self-signed-certificates signs Traefik's certificates (requires `ingress`), and COS Lite runs with internal TLS when `observability` is true."
+  description = "Enable TLS. When true, self-signed-certificates signs Traefik's certificates (requires `ingress_provider = \"traefik\"`), and COS Lite runs with internal TLS when `observability` is true."
   type        = bool
   default     = false
 
   validation {
-    condition     = !var.tls || var.ingress
-    error_message = "`tls` requires `ingress` to be true, because the certificates are served by Traefik."
+    condition     = !var.tls || var.ingress_provider == "traefik"
+    error_message = "`tls` requires `ingress_provider` to be \"traefik\", because the certificates are served by Traefik."
   }
 }
 
-variable "ingress" {
-  description = "Deploy Traefik and relate it to Immich to expose it externally."
-  type        = bool
-  default     = true
+variable "ingress_provider" {
+  description = "How Immich is exposed externally. `traefik` deploys Traefik; `tailscale` deploys tailscale-beacon-k8s in the Immich model and tailscale-k8s in the tailscale model; `none` deploys no ingress."
+  type        = string
+  default     = "traefik"
+
+  validation {
+    condition     = contains(["traefik", "tailscale", "none"], var.ingress_provider)
+    error_message = "`ingress_provider` must be one of: traefik, tailscale, none."
+  }
 }
 
 variable "observability" {
@@ -169,6 +174,63 @@ variable "opentelemetry_collector" {
     config             = optional(map(string), {})
     constraints        = optional(string, "arch=amd64")
     resources          = optional(map(string), {})
+    revision           = optional(number, null)
+    storage_directives = optional(map(string), {})
+    units              = optional(number, 1)
+  })
+  default = {}
+}
+
+# -------------- # Tailscale ingress --------------
+# Used only when `ingress_provider` is `tailscale`.
+
+variable "tailscale_model" {
+  description = "Model that hosts tailscale-k8s. When `uuid` is set, an existing model is looked up; otherwise a new model is created with the given name. The tailscale-k8s operator is cluster-wide, so this model must be on the same Kubernetes cluster as Immich."
+  type = object({
+    uuid = optional(string)
+    name = optional(string, "tailscale")
+  })
+  default = {}
+
+  validation {
+    condition     = var.tailscale_model.uuid == null || can(regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$", var.tailscale_model.uuid))
+    error_message = "`tailscale_model.uuid` must be a valid UUID."
+  }
+
+  validation {
+    condition     = var.tailscale_model.uuid != null || length(var.tailscale_model.name) > 0
+    error_message = "`tailscale_model.name` must be non-empty when creating a model (i.e. when `tailscale_model.uuid` is null)."
+  }
+}
+
+variable "tailscale_credentials" {
+  description = "OAuth client credentials for tailscale-k8s, stored in a Juju secret granted to the tailscale application. Required when `ingress_provider` is `tailscale`. The OAuth client needs `devices:core` (read and write) and `auth_keys` scopes and must carry `tag:k8s-operator`."
+  type = object({
+    client_id     = string
+    client_secret = string
+  })
+  default   = null
+  sensitive = true
+}
+
+variable "tailscale_beacon" {
+  description = "Application configuration for tailscale-beacon-k8s, deployed in the Immich model and related to Immich's `ingress` relation. For more details: https://registry.terraform.io/providers/juju/juju/latest/docs/resources/application"
+  type = object({
+    app_name    = optional(string, "tailscale-beacon-k8s")
+    config      = optional(map(string), {})
+    constraints = optional(string, "arch=amd64")
+    revision    = optional(number, null)
+    units       = optional(number, 1)
+  })
+  default = {}
+}
+
+variable "tailscale" {
+  description = "Application configuration for tailscale-k8s, deployed in the tailscale model. `config.credentials` is set by this module to the Juju secret holding `tailscale_credentials`."
+  type = object({
+    app_name           = optional(string, "tailscale")
+    config             = optional(map(string), {})
+    constraints        = optional(string, "arch=amd64")
     revision           = optional(number, null)
     storage_directives = optional(map(string), {})
     units              = optional(number, 1)
