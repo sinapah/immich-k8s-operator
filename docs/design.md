@@ -90,14 +90,14 @@ The charm should verify PostgreSQL compatibility where possible and block early 
 
 ## Ingress and external URL
 
-The charm should support Traefik ingress through a Juju ingress relation. When ingress data is available, the charm should configure Immich's external URL accordingly.
+The charm supports Traefik ingress or Tailscale ingress (via tailscale-beacon-k8s) through a Juju `ingress` relation. The charm uses the generic `IngressPerAppRequirer`, so either provider works. When ingress data is available, the charm should configure Immich's external URL accordingly.
 
 Implementation and docs should account for:
 
 - default Immich service port `2283`
 - websocket behavior
 - large upload/body-size requirements
-- TLS termination being handled by ingress
+- TLS termination being handled by the ingress provider. Tailscale ingress serves plain `http://` on the tailnet; Traefik ingress terminates TLS.
 - manual fallback behavior if ingress data is incomplete
 
 ## Secrets and auth scope

@@ -75,6 +75,21 @@ resource "juju_integration" "traefik_receive_ca_certificate" {
   }
 }
 
+resource "juju_integration" "immich_tailscale_ingress" {
+  count      = local.tailscale_enabled ? 1 : 0
+  model_uuid = local.model_uuid
+
+  application {
+    name     = juju_application.immich.name
+    endpoint = "ingress"
+  }
+
+  application {
+    name     = module.tailscale_beacon[0].app_name
+    endpoint = module.tailscale_beacon[0].provides.ingress
+  }
+}
+
 # -------------- # Observability: local to the Immich model --------------
 
 resource "juju_integration" "immich_logging" {
